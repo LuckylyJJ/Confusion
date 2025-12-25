@@ -3051,84 +3051,118 @@ async function handleSubscriptionPage(request, user = null) {
                         const t = translations[isFarsi ? 'fa' : 'zh'];
                     
                     let detectedRegion = 'US'; // 默认值
-                    let isCustomIPMode = false;
-                    let isManualRegionMode = false;
-                    try {
-    const response = await fetch(window.location.pathname + '/region');
-    const data = await response.json();
-    
-    if (data.region === 'CUSTOM') {
-        isCustomIPMode = true;
-        detectedRegion = 'CUSTOM';
+        let isCustomIPMode = false;
+        let isManualRegionMode = false;
         
-        // 获取自定义IP的详细信息
-        const customIPInfo = data.ci || t.unknown;
-        
-        geoInfo.innerHTML = t.detectionMethod + '<span style="color: #ffaa00;">⚙️ ' + t.customIPMode + '</span>';
-        regionStatus.innerHTML = t.workerRegion + '<span style="color: #ffaa00;">🔧 ' + t.customIPModeDesc + '</span>';
-        
-        // 显示自定义IP配置状态，包含具体IP
-        if (backupStatus) backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #ffaa00;">🔧 ' + t.usingCustomProxyIP + customIPInfo + '</span>';
-        if (currentIP) currentIP.innerHTML = t.currentIP + '<span style="color: #ffaa00;">✅ ' + customIPInfo + t.customIPConfig + '</span>';
-        if (regionMatch) regionMatch.innerHTML = t.regionMatch + '<span style="color: #ffaa00;">⚠️ ' + t.customIPModeDisabled + '</span>';
-        
-        return; // 提前返回，不执行后续的地区匹配逻辑
-    } else if (data.detectionMethod === '手动指定地区' || data.detectionMethod === 'تعیین منطقه دستی') {
-        isManualRegionMode = true;
-        detectedRegion = data.region;
-        
-        // 如果检测到sc，转换为HK
-        if (detectedRegion === 'sc') {
-            detectedRegion = 'HK';
+        try {
+            // 尝试多种可能的API路径
+            const apiPaths = [
+                '/region',  // 直接访问/region
+                window.location.pathname + '/region', // 当前路径+region
+                '/test-api', // 测试API
+                window.location.pathname + '/test-api' // 当前路径+test-api
+            ];
+            
+            let data = null;
+            let lastError = null;
+            
+            // 尝试每个路径直到成功
+            for (const apiPath of apiPaths) {
+                try {
+                    console.log('尝试API路径:', apiPath);
+                    const response = await fetch(apiPath);
+                    
+                    if (response.ok) {
+                        data = await response.json();
+                        console.log('API返回数据:', data);
+                        break;
+                    }
+                } catch (err) {
+                    lastError = err;
+                    console.log('API路径失败:', apiPath, err);
+                    continue;
+                }
+            }
+            
+            if (!data) {
+                throw new Error('所有API路径都失败了: ' + (lastError ? lastError.message : '未知错误'));
+            }
+            
+            // 处理返回的数据
+            if (data.region === 'CUSTOM') {
+                isCustomIPMode = true;
+                detectedRegion = 'CUSTOM';
+                
+                // 获取自定义IP的详细信息
+                const customIPInfo = data.ci || t.unknown;
+                
+                geoInfo.innerHTML = t.detectionMethod + '<span style="color: #ffaa00;">⚙️ ' + t.customIPMode + '</span>';
+                regionStatus.innerHTML = t.workerRegion + '<span style="color: #ffaa00;">🔧 ' + t.customIPModeDesc + '</span>';
+                
+                // 显示自定义IP配置状态，包含具体IP
+                if (backupStatus) backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #ffaa00;">🔧 ' + t.usingCustomProxyIP + customIPInfo + '</span>';
+                if (currentIP) currentIP.innerHTML = t.currentIP + '<span style="color: #ffaa00;">✅ ' + customIPInfo + t.customIPConfig + '</span>';
+                if (regionMatch) regionMatch.innerHTML = t.regionMatch + '<span style="color: #ffaa00;">⚠️ ' + t.customIPModeDisabled + '</span>';
+                
+                return;
+            } else if (data.detectionMethod && (data.detectionMethod.includes('手动指定') || data.detectionMethod.includes('تعیین منطقه دستی'))) {
+                isManualRegionMode = true;
+                detectedRegion = data.region || data.detectedRegion || 'US';
+                
+                // 修正地区代码
+                if (detectedRegion === 'sc') detectedRegion = 'HK';
+                
+                geoInfo.innerHTML = t.detectionMethod + '<span style="color: #44aa44;">' + t.manualRegion + '</span>';
+                regionStatus.innerHTML = t.workerRegion + '<span style="color: #44ff44;">🎯 ' + (t.regionNames[detectedRegion] || detectedRegion) + t.manualRegionDesc + '</span>';
+                
+                // 显示配置状态而不是检测状态
+                if (backupStatus) backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #44ff44;">✅ ' + t.proxyIPAvailable + '</span>';
+                if (currentIP) currentIP.innerHTML = t.currentIP + '<span style="color: #44ff44;">✅ ' + t.smartSelection + '</span>';
+                if (regionMatch) regionMatch.innerHTML = t.regionMatch + '<span style="color: #44ff44;">✅ ' + t.sameRegionIP + '</span>';
+                
+                return;
+            } else if (data.region || data.detectedRegion) {
+                detectedRegion = data.region || data.detectedRegion;
+                
+                // 修正地区代码
+                if (detectedRegion === 'sc') detectedRegion = 'HK';
+                
+                if (t.regionNames[detectedRegion]) {
+                    geoInfo.innerHTML = t.detectionMethod + '<span style="color: #44ff44;">' + t.cloudflareDetection + '</span>';
+                    regionStatus.innerHTML = t.workerRegion + '<span style="color: #44ff44;">✅ ' + t.regionNames[detectedRegion] + '</span>';
+                } else {
+                    // 未知地区
+                    geoInfo.innerHTML = t.detectionMethod + '<span style="color: #44ff44;">' + t.cloudflareDetection + '</span>';
+                    regionStatus.innerHTML = t.workerRegion + '<span style="color: #ffaa00;">❓ ' + detectedRegion + '</span>';
+                }
+            } else {
+                // 数据格式不正确
+                throw new Error('API返回的数据格式不正确');
+            }
+            
+        } catch (e) {
+            console.error('获取地区信息失败:', e);
+            geoInfo.innerHTML = t.detectionMethod + '<span style="color: #ff4444;">' + t.detectionFailed + '</span>';
+            regionStatus.innerHTML = t.workerRegion + '<span style="color: #ff4444;">❌ ' + t.detectionFailed + '</span>';
+            
+            // 设置默认值
+            detectedRegion = 'US';
         }
         
-        geoInfo.innerHTML = t.detectionMethod + '<span style="color: #44aa44;">' + t.manualRegion + '</span>';
-        regionStatus.innerHTML = t.workerRegion + '<span style="color: #44ff44;">🎯 ' + t.regionNames[detectedRegion] + t.manualRegionDesc + '</span>';
-        
-        // 显示配置状态而不是检测状态
-        if (backupStatus) backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #44ff44;">✅ ' + t.proxyIPAvailable + '</span>';
-        if (currentIP) currentIP.innerHTML = t.currentIP + '<span style="color: #44ff44;">✅ ' + t.smartSelection + '</span>';
-        if (regionMatch) regionMatch.innerHTML = t.regionMatch + '<span style="color: #44ff44;">✅ ' + t.sameRegionIP + '</span>';
-        
-        return; // 提前返回，不执行后续的地区匹配逻辑
-    } else if (data.region && t.regionNames[data.region]) {
-        detectedRegion = data.region;
-        
-        // 如果检测到sc，转换为HK
-        if (detectedRegion === 'sc') {
-            detectedRegion = 'HK';
+        // 直接显示配置状态，不再进行检测
+        if (backupStatus) {
+            backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #44ff44;">✅ ' + t.proxyIPAvailable + '</span>';
         }
-    }
-    
-    // 如果地区是sc，在这里也需要转换
-    if (detectedRegion === 'sc') {
-        detectedRegion = 'HK';
-    }
-    
-    geoInfo.innerHTML = t.detectionMethod + '<span style="color: #44ff44;">' + t.cloudflareDetection + '</span>';
-    
-} catch (e) {
-    geoInfo.innerHTML = t.detectionMethod + '<span style="color: #ff4444;">' + t.detectionFailed + '</span>';
-} catch (e) {
-                            geoInfo.innerHTML = t.detectionMethod + '<span style="color: #ff4444;">' + t.detectionFailed + '</span>';
-                    }
-                    
-                        regionStatus.innerHTML = t.workerRegion + '<span style="color: #44ff44;">✅ ' + t.regionNames[detectedRegion] + '</span>';
-                    
-                    // 直接显示配置状态，不再进行检测
-                    if (backupStatus) {
-                            backupStatus.innerHTML = t.proxyIPStatus + '<span style="color: #44ff44;">✅ ' + t.proxyIPAvailable + '</span>';
-                    }
-                    
-                    if (currentIP) {
-                            currentIP.innerHTML = t.currentIP + '<span style="color: #44ff44;">✅ ' + t.smartSelection + '</span>';
-                    }
-                    
-                    if (regionMatch) {
-                            regionMatch.innerHTML = t.regionMatch + '<span style="color: #44ff44;">✅ ' + t.sameRegionIP + '</span>';
-                    }
-                    
-                } catch (error) {
+        
+        if (currentIP) {
+            currentIP.innerHTML = t.currentIP + '<span style="color: #44ff44;">✅ ' + t.smartSelection + '</span>';
+        }
+        
+        if (regionMatch) {
+            regionMatch.innerHTML = t.regionMatch + '<span style="color: #44ff44;">✅ ' + t.sameRegionIP + '</span>';
+        }
+        
+    } catch (error) {
                         function getCookie(name) {
                             const value = '; ' + document.cookie;
                             const parts = value.split('; ' + name + '=');
